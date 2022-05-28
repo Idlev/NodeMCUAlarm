@@ -1,7 +1,7 @@
-
+//
 //Home alarm system prototype, NodeMCU/ESP8266
 //Movement detection with PIR sensor, sends email alert to user using SMTP
-//Sends time data to backend server for storage via url encoded HTTP post request
+//
 
 #include <ESP8266WiFi.h>
 #include <ESP_Mail_Client.h>
@@ -21,22 +21,12 @@ const char* WIFI_PASSWORD = "REPLACE_WIFI_PASSWORD";
 const char* SMTP_HOST = "smtp.gmail.com";
 const int SMTP_PORT = 465;
 
-//Time zone offset in seconds for local time (UTC+3)
-const int utcOffset = 3*60*60;
-
-//NTP/Udp
-WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP,"pool.tnp.org",utcOffset);
-
 //Credentials for sending email
 const char* SEND_EMAIL = "REPLACE_SENDER_EMAIL_ADDRESS";
 const char* SEND_PASSWORD = "REPLACE_SENDER_PASSWORD";
 
 //Email address to recieve alert
 const char* RECIEVE_EMAIL = "REPLACE_RECIEVE_EMAIL_ADDRESS";
-
-//Backend server for HTTP post
-const char* SERVER_NAME = "REPLACE_SERVER_NAME/IP";
 
 //SMTP object for email sending
 SMTPSession smtp;
@@ -105,9 +95,6 @@ void setup() {
   message.text.charSet = "us-ascii";
   message.text.transfer_encoding = Content_Transfer_Encoding::enc_7bit;
 
-  //Start time client
-  timeClient.begin();
-
   //Enable interrupt
   ETS_GPIO_INTR_ENABLE();
 }
@@ -120,45 +107,6 @@ void loop() {
     //Disable interrupts
     ETS_GPIO_INTR_DISABLE();
     if(WiFi.status() == WL_CONNECTED){
-
-      //HTTP and WiFi objects
-      WiFiClient clnt;
-      HTTPClient http;
-
-      //SEND DATETIME TO BACKEND SERVER
-      if(!http.begin(clnt,SERVER_NAME)){
-        Serial.println("Error, Unable to begin http");
-      }else{
-  
-        //Update time
-        timeClient.update();
-        time_t eTime = timeClient.getEpochTime();
-        struct tm *ptm = gmtime((time_t*)&eTime);
-        int dateYear = ptm->tm_year+1900;
-        int dateMonth = ptm->tm_mon+1;
-        int dateDay = ptm->tm_mday;
-        String fTime = timeClient.getFormattedTime();
-
-        //Define content type, url encoded HTTP post request
-        http.addHeader("Content-Type","application/x-www-form-urlencoded");
-        
-        //Format date time "date=YYYY-MM-DD HH:MM:SS"
-        String httpData = "date=" +String(dateYear) + "-" + 
-        String(dateMonth) + "-" + String(dateDay) + " " + fTime; 
-        Serial.print("Data sent: ");
-        Serial.println(httpData);
-  
-        //HTTP post request
-        int httpSend = http.POST(httpData); //send
-        String payload = http.getString(); //response
-  
-        Serial.print("HTTP Code: ");
-        Serial.println(httpSend);
-  
-        Serial.print("Response: ");
-        Serial.println(payload);
-
-      }
 
       //SEND USER ALERT NOTIFICATION
       //Connect to server with session data
