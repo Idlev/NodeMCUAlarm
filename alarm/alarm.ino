@@ -5,9 +5,6 @@
 
 #include <ESP8266WiFi.h>
 #include <ESP_Mail_Client.h>
-#include <NTPClient.h>
-#include <ESP8266HTTPClient.h>
-#include <WiFiUdp.h>
 
 const int LED = 2; //Pin D4 on NodeMCU
 const int SENSOR = 12; //Pin D6 on NodeMCU
@@ -44,8 +41,11 @@ void smtpCallback(SMTP_Status status);
 void ICACHE_RAM_ATTR handleInterrupt();
 
 void setup() {
+
+  //Serial monitor for debugging, default baudrate
+  Serial.begin(115200);
   
-  Serial.begin(115200); //Serial monitor for debugging, default baudrate
+  //Set GPIO pins on board, LED as output, PIR as input with pullup resistor
   pinMode(LED,OUTPUT);
   pinMode(SENSOR,INPUT_PULLUP); 
   digitalWrite(LED,LOW);
@@ -101,7 +101,7 @@ void setup() {
 
 void loop() {
 
-  //PIR sensor interrupt triggers email notification
+  //Interrupt from sensor triggers email notification
   if(sensorStatus == 1){
     
     //Disable interrupts
