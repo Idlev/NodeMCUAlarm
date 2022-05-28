@@ -94,9 +94,6 @@ void setup() {
 
 void connectWifi(){
 
-  //Disable interrupts
-  ETS_GPIO_INTR_DISABLE();
-
   //Station mode
   WiFi.mode(WIFI_STA);
 
@@ -112,9 +109,6 @@ void connectWifi(){
   Serial.println("Wifi connected");
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
-
-  //Enable interrupts
-  ETS_GPIO_INTR_ENABLE();
 
 }
 
