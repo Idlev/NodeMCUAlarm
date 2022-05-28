@@ -1,14 +1,23 @@
 //
 //Home alarm system prototype, NodeMCU/ESP8266
 //Movement detection with PIR sensor, sends email alert to user using SMTP
+//Light Sleep mode between interrupts
 //
 
 #include <ESP8266WiFi.h>
 #include <ESP_Mail_Client.h>
 
+extern "C"{
+  #include "gpio.h"
+}
+
+extern "C"{
+  #include "user_interface.h"
+}
+
 const int LED = 2; //Pin D4 on NodeMCU
 const int SENSOR = 12; //Pin D6 on NodeMCU
-int sensorStatus = 0; //Movement detection flag
+int sensor_status = 0; //Movement detection flag
 
 //Credentials for Wi-Fi network
 const char* WIFI_NAME = "REPLACE_WIFI_NAME";
@@ -37,10 +46,9 @@ SMTP_Message message;
 //Callback function for eamil status
 void smtpCallback(SMTP_Status status);
 
-//Interrupt callback function, store to RAM
-void ICACHE_RAM_ATTR handleInterrupt();
-
 void setup() {
+
+  gpio_init();
 
   //Serial monitor for debugging, default baudrate
   Serial.begin(115200);
@@ -49,26 +57,7 @@ void setup() {
   pinMode(LED,OUTPUT);
   pinMode(SENSOR,INPUT_PULLUP); 
   digitalWrite(LED,LOW);
-
-  //External interrupt for sensor on rising edge
-  attachInterrupt(digitalPinToInterrupt(SENSOR),handleInterrupt,RISING);
-
-  //Disable interrupt while connecting to Wi-Fi
-  ETS_GPIO_INTR_DISABLE();
-
-  //Connect to Wi-Fi network
-  WiFi.mode(WIFI_STA); //Station mode
-  Serial.println("Starting Wi-Fi connection...");
-  WiFi.begin(WIFI_NAME,WIFI_PASSWORD);
-
-  while(WiFi.status() != WL_CONNECTED){
-    delay(500);
-    Serial.println("Connecting...");
-  }
-
-  Serial.println("Wifi connected");
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
+  digitalWrite(SENSOR,LOW);
 
   //Enable SMTP serial monitor debug
   smtp.debug(1);
@@ -95,65 +84,102 @@ void setup() {
   message.text.charSet = "us-ascii";
   message.text.transfer_encoding = Content_Transfer_Encoding::enc_7bit;
 
-  //Enable interrupt
-  ETS_GPIO_INTR_ENABLE();
+  //Connect to to WiFi initially, otherwise wakes up from sleep immediately
+  connectWifi();
+
+  //Give the system some start-up time (15s)
+  delay(15000);
 }
 
-void loop() {
 
-  //Interrupt from sensor triggers email notification
-  if(sensorStatus == 1){
-    
-    //Disable interrupts
-    ETS_GPIO_INTR_DISABLE();
-    if(WiFi.status() == WL_CONNECTED){
+void connectWifi(){
 
-      //SEND USER ALERT NOTIFICATION
-      //Connect to server with session data
-      if(!smtp.connect(&session))
-        Serial.println("Unable to connect server");
+  //Disable interrupts
+  ETS_GPIO_INTR_DISABLE();
 
-      //Attempt sending Email
-      if(!MailClient.sendMail(&smtp, &message))
-        Serial.println("Error sending Email, " + smtp.errorReason());
+  //Station mode
+  WiFi.mode(WIFI_STA);
 
-    }else{
-      //Try reconnect Wi-Fi if connection lost
-      Serial.println("Wifi disconnected...");
+  //Connect to Wi-Fi network
+  Serial.println("Starting Wi-Fi connection...");
+  WiFi.begin(WIFI_NAME,WIFI_PASSWORD);
 
-      Serial.println("Starting Wi-Fi connection...");
-      WiFi.begin(WIFI_NAME,WIFI_PASSWORD);
-
-      while(WiFi.status() != WL_CONNECTED){
-        delay(500);
-        Serial.println("Connecting...");
-      }
-
-      Serial.println("Wifi connected");
-      Serial.print("IP address: ");
-      Serial.println(WiFi.localIP());
-    }
-  }else{
-    //Do nothing when movement not detected
-    //Could use sleep modes with interrupts...
+  while(WiFi.status() != WL_CONNECTED){
+    delay(500);
+    Serial.println("Connecting...");
   }
 
-  //Reset interrupt flag
-  sensorStatus = 0;
+  Serial.println("Wifi connected");
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
 
   //Enable interrupts
   ETS_GPIO_INTR_ENABLE();
 
 }
 
-//Interrupt routine
-//Triggers email notification, blinks LED
-void handleInterrupt(){
-  digitalWrite(LED,HIGH);
-  delayMicroseconds(2000000); //2s delay
-  digitalWrite(LED,LOW);
+//Enter Light sleep mode
+//Wake up from external interrupt from SENSOR pin
+void lightSleep(){
+  
+  WiFi.mode(WIFI_OFF);
+  delay(200);
+  Serial.println("Going to Sleep");
 
-  sensorStatus = 1; //Set interrupt flag
+  wifi_fpm_set_sleep_type(LIGHT_SLEEP_T);
+  gpio_pin_wakeup_enable(GPIO_ID_PIN(SENSOR), GPIO_PIN_INTR_HILEVEL); 
+  wifi_fpm_open();
+  wifi_fpm_do_sleep(0xFFFFFFF); //sleep for max time  
+  delay(200);
+  wifi_fpm_close();
+
+  Serial.println("Waking up!"); 
+
+  //PIR stays high for some time, check if woke up to interrupt
+  //and not sleep timer timeout
+  if(digitalRead(SENSOR) == HIGH)
+    sensor_status = 1;
+}
+
+//LED blinker indicator
+void ledBlinker(){
+
+  digitalWrite(LED,HIGH);
+  delay(500);
+  digitalWrite(LED,LOW);
+  delay(500);
+}
+
+void loop() {
+    
+  if(sensor_status == 1){
+
+    //Connect to wifi
+    connectWifi();
+    
+    //SEND USER ALERT NOTIFICATION
+    //Connect to server with session data
+    if(!smtp.connect(&session))
+      Serial.println("Unable to connect server");
+  
+    //Attempt sending Email
+    if(!MailClient.sendMail(&smtp, &message))
+      Serial.println("Error sending Email, " + smtp.errorReason());
+    
+  }
+
+  //Sensor reading needs to be low when enters sleep-mode
+  //Otherwise won't wake up
+  if(digitalRead(SENSOR) == HIGH){
+    ledBlinker();
+    sensor_status = 0;
+  }else{ 
+    lightSleep();
+  }
+
+  //Without this SENSOR pin stays high indefinitely
+  pinMode(SENSOR,INPUT_PULLUP);
+ 
 }
 
 //Print email info
